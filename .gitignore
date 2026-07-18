@@ -45,3 +45,10 @@ application.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Redis dump
+dump.rdb
