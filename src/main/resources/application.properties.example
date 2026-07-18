@@ -1,0 +1,10 @@
+spring.datasource.url=jdbc:postgresql://localhost:5432/fleet_db
+spring.datasource.username=username
+spring.datasource.password=Pssword
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+server.port=8081
+spring.task.scheduling.enabled=true
+spring.jpa.open-in-view=false

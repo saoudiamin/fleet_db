@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Fleet Manager — Sofrecom</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+/* ── TOKENS ─────────────────────────────────────── */
+:root {
+  --bg:        #F7F8FA;
+  --surface:   #FFFFFF;
+  --border:    #E4E7EC;
+  --text:      #111827;
+  --muted:     #6B7280;
+  --accent:    #2563EB;
+  --accent-lt: #EFF6FF;
+  --danger:    #DC2626;
+  --danger-lt: #FEF2F2;
+  --warn:      #D97706;
+  --warn-lt:   #FFFBEB;
+  --success:   #16A34A;
+  --success-lt:#F0FDF4;
+  --sidebar-w: 220px;
+  --radius:    10px;
+  --shadow:    0 1px 4px rgba(0,0,0,.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; font-size: 14px; }
+
+/* ── SIDEBAR ─────────────────────────────────────── */
+#sidebar {
+  width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 100;
+}
+.logo {
+  padding: 20px 16px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.logo-title { font-size: 15px; font-weight: 700; color: var(--accent); }
+.logo-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+nav { flex: 1; padding: 12px 8px; overflow-y: auto; }
+.nav-section { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; padding: 12px 8px 6px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 8px;
+  cursor: pointer; color: var(--muted);
+  font-size: 13px; font-weight: 500;
+  transition: background .15s, color .15s;
+  margin-bottom: 2px;
+}
+.nav-item:hover { background: var(--bg); color: var(--text); }
+.nav-item.active { background: var(--accent-lt); color: var(--accent); }
+.nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+}
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── MAIN ────────────────────────────────────────── */
+#main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 50;
+}
+.page-title { font-size: 17px; font-weight: 600; }
+.topbar-actions { display: flex; gap: 8px; }
+
+.content { padding: 24px; flex: 1; }
+
+/* ── CARDS / KPI ─────────────────────────────────── */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.kpi-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.kpi-value { font-size: 26px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.kpi-card.danger .kpi-value { color: var(--danger); }
+.kpi-card.warn   .kpi-value { color: var(--warn); }
+.kpi-card.success .kpi-value { color: var(--success); }
+.kpi-card.accent  .kpi-value { color: var(--accent); }
+
+/* ── TABLE ───────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.card-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.card-title { font-size: 14px; font-weight: 600; }
+
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 10px 16px;
+  font-size: 11px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .05em;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg); }
+
+/* ── BADGES ──────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 600;
+}
+.badge.actif       { background: var(--success-lt); color: var(--success); }
+.badge.arrete      { background: var(--danger-lt);  color: var(--danger); }
+.badge.maintenance { background: var(--warn-lt);    color: var(--warn); }
+.badge.speed       { background: var(--danger-lt);  color: var(--danger); }
+.badge.temperature { background: var(--warn-lt);    color: var(--warn); }
+.badge.geofence    { background: var(--accent-lt);  color: var(--accent); }
+
+/* ── BUTTONS ─────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  border: none; transition: opacity .15s;
+}
+.btn:hover { opacity: .85; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-danger  { background: var(--danger); color: white; }
+.btn-ghost   { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ── SCORE BAR ───────────────────────────────────── */
+.score-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.score-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.score-bar-fill { height: 100%; border-radius: 3px; transition: width .6s; }
+.score-label { font-size: 12px; font-weight: 700; font-family: 'JetBrains Mono', monospace; width: 36px; text-align: right; }
+
+/* ── MODAL ───────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200; opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+.modal-backdrop.open { opacity: 1; pointer-events: all; }
+.modal {
+  background: var(--surface);
+  border-radius: 14px;
+  width: 480px; max-width: 95vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  transform: translateY(12px);
+  transition: transform .2s;
+}
+.modal-backdrop.open .modal { transform: translateY(0); }
+.modal-header {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-title { font-size: 15px; font-weight: 600; }
+.modal-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--muted); }
+.modal-body  { padding: 18px 20px; }
+.modal-footer{ padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── FORM ────────────────────────────────────────── */
+.form-group { margin-bottom: 14px; }
+label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .04em; }
+input, select {
+  width: 100%; padding: 9px 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-family: 'Inter', sans-serif;
+  background: var(--bg); color: var(--text);
+  transition: border-color .15s;
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); background: white; }
+
+/* ── MAP ─────────────────────────────────────────── */
+#map { height: calc(100vh - 130px); border-radius: var(--radius); overflow: hidden; }
+
+/* ── FILTERS ─────────────────────────────────────── */
+.filter-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-bar input, .filter-bar select { width: auto; flex: 1; min-width: 140px; }
+
+/* ── PAGES ───────────────────────────────────────── */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── EMPTY STATE ─────────────────────────────────── */
+.empty { text-align: center; padding: 40px; color: var(--muted); }
+.empty-icon { font-size: 36px; margin-bottom: 10px; }
+
+/* ── TOAST ───────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--text); color: white;
+  padding: 12px 18px; border-radius: 10px;
+  font-size: 13px; font-weight: 500;
+  transform: translateY(60px); opacity: 0;
+  transition: all .25s; z-index: 999;
+}
+#toast.show { transform: translateY(0); opacity: 1; }
+#toast.success { background: var(--success); }
+#toast.error   { background: var(--danger); }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside id="sidebar">
+  <div class="logo">
+    <div class="logo-title">🚗 Fleet Manager</div>
+    <div class="logo-sub">Sofrecom Tunisie</div>
+  </div>
+  <nav>
+    <div class="nav-section">Principal</div>
+    <div class="nav-item active" onclick="showPage('dashboard')">
+      <span class="icon">📊</span> Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('map')">
+      <span class="icon">🗺️</span> Live Map
+    </div>
+
+    <div class="nav-section">Gestion</div>
+    <div class="nav-item" onclick="showPage('vehicles')">
+      <span class="icon">🚙</span> Véhicules
+    </div>
+    <div class="nav-item" onclick="showPage('chauffeurs')">
+      <span class="icon">👤</span> Chauffeurs
+    </div>
+    <div class="nav-item" onclick="showPage('maintenance')">
+      <span class="icon">🔧</span> Maintenance
+    </div>
+
+    <div class="nav-section">Analyse</div>
+    <div class="nav-item" onclick="showPage('alerts')">
+      <span class="icon">🚨</span> Alertes
+    </div>
+    <div class="nav-item" onclick="showPage('scores')">
+      <span class="icon">🏆</span> Scores
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <span class="status-dot"></span> API connectée
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main id="main">
+  <div class="topbar">
+    <div class="page-title" id="pageTitle">Dashboard</div>
+    <div class="topbar-actions" id="topbarActions"></div>
+  </div>
+  <div class="content">
+
+    <!-- PAGE: DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div class="kpi-grid" id="kpiGrid">
+        <div class="kpi-card accent"><div class="kpi-label">Véhicules</div><div class="kpi-value" id="kpi-total">—</div></div>
+        <div class="kpi-card success"><div class="kpi-label">Actifs</div><div class="kpi-value" id="kpi-actif">—</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Maintenance</div><div class="kpi-value" id="kpi-maint">—</div></div>
+        <div class="kpi-card danger"><div class="kpi-label">Total Alertes</div><div class="kpi-value" id="kpi-alerts">—</div></div>
+        <div class="kpi-card danger"><div class="kpi-label">Vitesse</div><div class="kpi-value" id="kpi-speed">—</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Température</div><div class="kpi-value" id="kpi-temp">—</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Trajets</div><div class="kpi-value" id="kpi-trajets">—</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Dernières alertes</span>
+          <button class="btn btn-ghost btn-sm" onclick="showPage('alerts')">Voir tout →</button>
+        </div>
+        <table>
+          <thead><tr><th>Véhicule</th><th>Type</th><th>Valeur</th><th>Timestamp</th></tr></thead>
+          <tbody id="dashAlerts"><tr><td colspan="4" class="empty">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAGE: MAP -->
+    <div class="page" id="page-map">
+      <div id="map"></div>
+    </div>
+
+    <!-- PAGE: VEHICLES -->
+    <div class="page" id="page-vehicles">
+      <div class="filter-bar">
+        <input type="text" id="vSearch" placeholder="🔍 Rechercher..." oninput="filterVehicles()"/>
+        <select id="vStatut" onchange="filterVehicles()">
+          <option value="">Tous les statuts</option>
+          <option value="ACTIF">Actif</option>
+          <option value="ARRETE">Arrêté</option>
+          <option value="MAINTENANCE">Maintenance</option>
+        </select>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Véhicules</span>
+          <button class="btn btn-primary btn-sm" onclick="openVehicleModal()">+ Ajouter</button>
+        </div>
+        <table>
+          <thead><tr><th>Nom</th><th>Matricule</th><th>Modèle</th><th>Type</th><th>Statut</th><th>Actions</th></tr></thead>
+          <tbody id="vehicleTable"><tr><td colspan="6" class="empty">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAGE: CHAUFFEURS -->
+    <div class="page" id="page-chauffeurs">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Chauffeurs</span>
+          <button class="btn btn-primary btn-sm" onclick="openChauffeurModal()">+ Ajouter</button>
+        </div>
+        <table>
+          <thead><tr><th>Nom</th><th>Prénom</th><th>Téléphone</th><th>Permis</th><th>Véhicule</th><th>Actions</th></tr></thead>
+          <tbody id="chauffeurTable"><tr><td colspan="6" class="empty">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAGE: ALERTS -->
+    <div class="page" id="page-alerts">
+      <div class="filter-bar">
+        <select id="aType" onchange="loadAlerts()">
+          <option value="">Tous les types</option>
+          <option value="SPEED">Vitesse</option>
+          <option value="TEMPERATURE">Température</option>
+          <option value="GEOFENCE">Geofence</option>
+        </select>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Alertes</span>
+          <span id="alertCount" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <table>
+          <thead><tr><th>Véhicule</th><th>Type</th><th>Valeur</th><th>Timestamp</th><th>Action</th></tr></thead>
+          <tbody id="alertTable"><tr><td colspan="5" class="empty">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAGE: SCORES -->
+    <div class="page" id="page-scores">
+      <div class="card">
+        <div class="card-header"><span class="card-title">🏆 Classement Chauffeurs</span></div>
+        <table>
+          <thead><tr><th>#</th><th>Véhicule</th><th>Score Global</th><th>Sécurité</th><th>Freinage</th><th>Discipline</th></tr></thead>
+          <tbody id="scoreTable"><tr><td colspan="6" class="empty">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAGE: MAINTENANCE -->
+    <div class="page" id="page-maintenance">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Planning Maintenance</span>
+          <button class="btn btn-primary btn-sm" onclick="openMaintenanceModal()">+ Ajouter</button>
+        </div>
+        <table>
+          <thead><tr><th>Véhicule</th><th>Type</th><th>Date intervention</th><th>Kilométrage</th><th>Prochain KM</th><th>Notes</th><th>Action</th></tr></thead>
+          <tbody id="maintenanceTable"><tr><td colspan="7" class="empty">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- MODAL VEHICLE -->
+<div class="modal-backdrop" id="vehicleModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="vehicleModalTitle">Ajouter un véhicule</span>
+      <button class="modal-close" onclick="closeModal('vehicleModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="vId"/>
+      <div class="form-group"><label>Nom</label><input id="vNom" placeholder="VEH-011"/></div>
+      <div class="form-group"><label>Matricule</label><input id="vMatricule" placeholder="TN-2024-123"/></div>
+      <div class="form-group"><label>Modèle</label><input id="vModele" placeholder="Mercedes Actros"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="vType">
+          <option>Camion</option><option>Voiture</option><option>Van</option><option>Bus</option><option>Moto</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Statut</label>
+        <select id="vStatutForm">
+          <option value="ACTIF">Actif</option>
+          <option value="ARRETE">Arrêté</option>
+          <option value="MAINTENANCE">Maintenance</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('vehicleModal')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveVehicle()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CHAUFFEUR -->
+<div class="modal-backdrop" id="chauffeurModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="chauffeurModalTitle">Ajouter un chauffeur</span>
+      <button class="modal-close" onclick="closeModal('chauffeurModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="cId"/>
+      <div class="form-group"><label>Nom</label><input id="cNom" placeholder="Ben Ali"/></div>
+      <div class="form-group"><label>Prénom</label><input id="cPrenom" placeholder="Mohamed"/></div>
+      <div class="form-group"><label>Téléphone</label><input id="cTel" placeholder="55123456"/></div>
+      <div class="form-group"><label>Permis</label><input id="cPermis" placeholder="TN-2020-123"/></div>
+      <div class="form-group"><label>Véhicule</label>
+        <select id="cVehicle"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('chauffeurModal')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveChauffeur()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL MAINTENANCE -->
+<div class="modal-backdrop" id="maintenanceModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Ajouter maintenance</span>
+      <button class="modal-close" onclick="closeModal('maintenanceModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label>Véhicule</label><select id="mVehicle"></select></div>
+      <div class="form-group"><label>Type</label><input id="mType" placeholder="Vidange / Révision..."/></div>
+      <div class="form-group"><label>Date intervention</label><input type="datetime-local" id="mDate"/></div>
+      <div class="form-group"><label>Kilométrage actuel</label><input type="number" id="mKm" placeholder="50000"/></div>
+      <div class="form-group"><label>Prochain KM</label><input type="number" id="mNextKm" placeholder="60000"/></div>
+      <div class="form-group"><label>Notes</label><input id="mNotes" placeholder="Détails..."/></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('maintenanceModal')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveMaintenance()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API = 'http://localhost:8081/api';
+let allVehicles = [];
+let map, markers = {};
+let mapInitialized = false;
+
+// ── NAVIGATION ───────────────────────────────────
+const pageTitles = {
+  dashboard:   'Dashboard',
+  map:         'Live Map',
+  vehicles:    'Gestion Véhicules',
+  chauffeurs:  'Gestion Chauffeurs',
+  alerts:      'Alertes',
+  scores:      'Scores & Classement',
+  maintenance: 'Maintenance'
+};
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.textContent.toLowerCase().includes(pageTitles[name].split(' ')[0].toLowerCase())) {
+      n.classList.add('active');
+    }
+  });
+  document.getElementById('pageTitle').textContent = pageTitles[name];
+  document.getElementById('topbarActions').innerHTML = '';
+
+  if (name === 'dashboard')   loadDashboard();
+  if (name === 'map')         initMap();
+  if (name === 'vehicles')    loadVehicles();
+  if (name === 'chauffeurs')  loadChauffeurs();
+  if (name === 'alerts')      loadAlerts();
+  if (name === 'scores')      loadScores();
+  if (name === 'maintenance') loadMaintenance();
+}
+
+// ── API HELPERS ──────────────────────────────────
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  if (!res.ok) throw new Error(await res.text());
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+// ── TOAST ────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3000);
+}
+
+// ── MODAL ────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── BADGE ────────────────────────────────────────
+function badge(text, cls) {
+  return `<span class="badge ${cls.toLowerCase()}">${text}</span>`;
+}
+function statBadge(s) {
+  const map = { ACTIF: 'actif', ARRETE: 'arrete', MAINTENANCE: 'maintenance' };
+  return badge(s, map[s] || '');
+}
+function alertBadge(t) {
+  const map = { SPEED: 'speed', TEMPERATURE: 'temperature', GEOFENCE: 'geofence' };
+  const label = { SPEED: '🚗 Vitesse', TEMPERATURE: '🌡️ Temp', GEOFENCE: '📍 Zone' };
+  return badge(label[t] || t, map[t] || '');
+}
+
+// ── SCORE COLOR ──────────────────────────────────
+function scoreColor(v) {
+  if (v >= 80) return 'var(--success)';
+  if (v >= 60) return 'var(--warn)';
+  return 'var(--danger)';
+}
+function scoreBar(v) {
+  return `<div class="score-bar-wrap">
+    <div class="score-bar"><div class="score-bar-fill" style="width:${v}%;background:${scoreColor(v)}"></div></div>
+    <span class="score-label" style="color:${scoreColor(v)}">${v}</span>
+  </div>`;
+}
+
+// ── FORMAT DATE ──────────────────────────────────
+function fmtDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+// ── DASHBOARD ────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const [kpis, alerts] = await Promise.all([
+      api('/dashboard/kpis'),
+      api('/alerts')
+    ]);
+    document.getElementById('kpi-total').textContent  = kpis.totalVehicles  ?? '—';
+    document.getElementById('kpi-actif').textContent  = kpis.actifs         ?? '—';
+    document.getElementById('kpi-maint').textContent  = kpis.maintenance    ?? '—';
+    document.getElementById('kpi-alerts').textContent = kpis.totalAlerts    ?? '—';
+    document.getElementById('kpi-speed').textContent  = kpis.speedAlerts    ?? '—';
+    document.getElementById('kpi-temp').textContent   = kpis.tempAlerts     ?? '—';
+    document.getElementById('kpi-trajets').textContent= kpis.totalTrajets   ?? '—';
+
+    const recent = alerts.slice(-10).reverse();
+    document.getElementById('dashAlerts').innerHTML = recent.length ? recent.map(a => `
+      <tr>
+        <td><strong>V-${a.vehicleId ?? a.vehicle?.id ?? '?'}</strong></td>
+        <td>${alertBadge(a.type)}</td>
+        <td style="font-family:'JetBrains Mono',monospace">${a.valeur?.toFixed(1) ?? '—'}</td>
+        <td style="color:var(--muted)">${fmtDate(a.timestamp)}</td>
+      </tr>`).join('') : '<tr><td colspan="4" class="empty">Aucune alerte</td></tr>';
+  } catch(e) {
+    toast('Erreur API: ' + e.message, 'error');
+  }
+}
+
+// ── LIVE MAP ─────────────────────────────────────
+function initMap() {
+  if (!mapInitialized) {
+    map = L.map('map').setView([36.8065, 10.1815], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    mapInitialized = true;
+  }
+  updateMapPositions();
+  if (window._mapInterval) clearInterval(window._mapInterval);
+  window._mapInterval = setInterval(updateMapPositions, 3000);
+}
+
+async function updateMapPositions() {
+  try {
+    const data = await api('/positions/live');
+    Object.entries(data).forEach(([key, raw]) => {
+      const pos = JSON.parse(raw);
+      const id  = key.replace('vehicle:live:', '');
+      const lat = parseFloat(pos.lat), lng = parseFloat(pos.lng);
+      const spd = parseFloat(pos.speed);
+      const color = spd > 120 ? '#DC2626' : spd > 80 ? '#D97706' : '#16A34A';
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 0 6px ${color}"></div>`,
+        iconSize: [12, 12], iconAnchor: [6, 6]
+      });
+      const popup = `<b>Vehicle #${id}</b><br>Vitesse: ${spd.toFixed(1)} km/h<br>Temp: ${parseFloat(pos.temperature).toFixed(1)}°C`;
+      if (markers[id]) {
+        markers[id].setLatLng([lat, lng]).setIcon(icon).setPopupContent(popup);
+      } else {
+        markers[id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup);
+      }
+    });
+  } catch(e) { console.error(e); }
+}
+
+// ── VEHICLES ─────────────────────────────────────
+async function loadVehicles() {
+  try {
+    allVehicles = await api('/vehicles');
+    renderVehicles(allVehicles);
+  } catch(e) { toast('Erreur chargement véhicules', 'error'); }
+}
+
+function renderVehicles(list) {
+  document.getElementById('vehicleTable').innerHTML = list.length ? list.map(v => `
+    <tr>
+      <td><strong>${v.nom ?? '—'}</strong></td>
+      <td style="font-family:'JetBrains Mono',monospace">${v.matricule ?? '—'}</td>
+      <td>${v.modele ?? '—'}</td>
+      <td>${v.type ?? '—'}</td>
+      <td>${statBadge(v.statut ?? 'ARRETE')}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="editVehicle(${v.id})">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteVehicle(${v.id})">🗑️</button>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="6" class="empty"><div class="empty-icon">🚙</div>Aucun véhicule</td></tr>';
+}
+
+function filterVehicles() {
+  const q = document.getElementById('vSearch').value.toLowerCase();
+  const s = document.getElementById('vStatut').value;
+  renderVehicles(allVehicles.filter(v =>
+    (!q || (v.nom+v.matricule+v.modele).toLowerCase().includes(q)) &&
+    (!s || v.statut === s)
+  ));
+}
+
+function openVehicleModal(v = null) {
+  document.getElementById('vehicleModalTitle').textContent = v ? 'Modifier véhicule' : 'Ajouter un véhicule';
+  document.getElementById('vId').value       = v?.id ?? '';
+  document.getElementById('vNom').value      = v?.nom ?? '';
+  document.getElementById('vMatricule').value= v?.matricule ?? '';
+  document.getElementById('vModele').value   = v?.modele ?? '';
+  document.getElementById('vType').value     = v?.type ?? 'Camion';
+  document.getElementById('vStatutForm').value = v?.statut ?? 'ACTIF';
+  openModal('vehicleModal');
+}
+
+function editVehicle(id) {
+  const v = allVehicles.find(x => x.id === id);
+  if (v) openVehicleModal(v);
+}
+
+async function saveVehicle() {
+  const id = document.getElementById('vId').value;
+  const body = {
+    nom:       document.getElementById('vNom').value,
+    matricule: document.getElementById('vMatricule').value,
+    modele:    document.getElementById('vModele').value,
+    type:      document.getElementById('vType').value,
+    statut:    document.getElementById('vStatutForm').value,
+    client:    { id: 1 }
+  };
+  try {
+    if (id) await api('/vehicles/' + id, 'PUT', body);
+    else    await api('/vehicles', 'POST', body);
+    closeModal('vehicleModal');
+    loadVehicles();
+    toast(id ? 'Véhicule modifié ✓' : 'Véhicule ajouté ✓');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+async function deleteVehicle(id) {
+  if (!confirm('Supprimer ce véhicule ?')) return;
+  try {
+    await api('/vehicles/' + id, 'DELETE');
+    loadVehicles();
+    toast('Véhicule supprimé');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+// ── CHAUFFEURS ────────────────────────────────────
+async function loadChauffeurs() {
+  try {
+    const list = await api('/chauffeurs');
+    document.getElementById('chauffeurTable').innerHTML = list.length ? list.map(c => `
+      <tr>
+        <td><strong>${c.nom ?? '—'}</strong></td>
+        <td>${c.prenom ?? '—'}</td>
+        <td>${c.telephone ?? '—'}</td>
+        <td style="font-family:'JetBrains Mono',monospace">${c.permis ?? '—'}</td>
+        <td>${c.vehicle ? 'V-' + c.vehicle.id : '—'}</td>
+        <td>
+          <button class="btn btn-danger btn-sm" onclick="deleteChauffeur(${c.id})">🗑️</button>
+        </td>
+      </tr>`).join('') : '<tr><td colspan="6" class="empty"><div class="empty-icon">👤</div>Aucun chauffeur</td></tr>';
+  } catch(e) { toast('Erreur chauffeurs', 'error'); }
+}
+
+async function openChauffeurModal() {
+  const vehicles = await api('/vehicles');
+  document.getElementById('cVehicle').innerHTML = vehicles.map(v =>
+    `<option value="${v.id}">${v.nom} (${v.matricule ?? '—'})</option>`
+  ).join('');
+  document.getElementById('cId').value = '';
+  document.getElementById('cNom').value = '';
+  document.getElementById('cPrenom').value = '';
+  document.getElementById('cTel').value = '';
+  document.getElementById('cPermis').value = '';
+  openModal('chauffeurModal');
+}
+
+async function saveChauffeur() {
+  const body = {
+    nom:       document.getElementById('cNom').value,
+    prenom:    document.getElementById('cPrenom').value,
+    telephone: document.getElementById('cTel').value,
+    permis:    document.getElementById('cPermis').value,
+    vehicle:   { id: parseInt(document.getElementById('cVehicle').value) }
+  };
+  try {
+    await api('/chauffeurs', 'POST', body);
+    closeModal('chauffeurModal');
+    loadChauffeurs();
+    toast('Chauffeur ajouté ✓');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+async function deleteChauffeur(id) {
+  if (!confirm('Supprimer ce chauffeur ?')) return;
+  try {
+    await api('/chauffeurs/' + id, 'DELETE');
+    loadChauffeurs();
+    toast('Chauffeur supprimé');
+  } catch(e) { toast('Erreur suppression', 'error'); }
+}
+
+// ── ALERTS ───────────────────────────────────────
+async function loadAlerts() {
+  const type = document.getElementById('aType')?.value ?? '';
+  try {
+    const list = await api(type ? '/alerts/type/' + type : '/alerts');
+    document.getElementById('alertCount').textContent = list.length + ' alertes';
+    document.getElementById('alertTable').innerHTML = list.length ? [...list].reverse().slice(0,100).map(a => `
+      <tr>
+        <td><strong>V-${a.vehicle?.id ?? '?'}</strong></td>
+        <td>${alertBadge(a.type)}</td>
+        <td style="font-family:'JetBrains Mono',monospace">${a.valeur?.toFixed(2) ?? '—'}</td>
+        <td style="color:var(--muted)">${fmtDate(a.timestamp)}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteAlert(${a.id})">🗑️</button></td>
+      </tr>`).join('') : '<tr><td colspan="5" class="empty"><div class="empty-icon">✅</div>Aucune alerte</td></tr>';
+  } catch(e) { toast('Erreur alertes', 'error'); }
+}
+
+async function deleteAlert(id) {
+  try {
+    await api('/alerts/' + id, 'DELETE');
+    loadAlerts();
+    toast('Alerte supprimée');
+  } catch(e) { toast('Erreur', 'error'); }
+}
+
+// ── SCORES ───────────────────────────────────────
+async function loadScores() {
+  try {
+    const vehicles = await api('/vehicles');
+    const scores = await Promise.all(vehicles.map(v => api('/scores/chauffeur/' + v.id)));
+    const sorted = scores.sort((a, b) => b.scoreGlobal - a.scoreGlobal);
+    const medals = ['🥇', '🥈', '🥉'];
+    document.getElementById('scoreTable').innerHTML = sorted.map((s, i) => `
+      <tr>
+        <td style="font-size:18px">${medals[i] ?? i+1}</td>
+        <td><strong>Vehicle #${s.vehicleId}</strong></td>
+        <td>${scoreBar(s.scoreGlobal)}</td>
+        <td>${scoreBar(s.securite)}</td>
+        <td>${scoreBar(s.freinage)}</td>
+        <td>${scoreBar(s.discipline)}</td>
+      </tr>`).join('');
+  } catch(e) { toast('Erreur scores', 'error'); }
+}
+
+// ── MAINTENANCE ──────────────────────────────────
+async function loadMaintenance() {
+  try {
+    const list = await api('/maintenances');
+    document.getElementById('maintenanceTable').innerHTML = list.length ? list.map(m => `
+      <tr>
+        <td><strong>V-${m.vehicle?.id ?? '?'}</strong></td>
+        <td>${m.type ?? '—'}</td>
+        <td style="color:var(--muted)">${fmtDate(m.dateIntervention)}</td>
+        <td style="font-family:'JetBrains Mono',monospace">${m.kilometrage?.toLocaleString() ?? '—'} km</td>
+        <td style="font-family:'JetBrains Mono',monospace">${m.prochainKm?.toLocaleString() ?? '—'} km</td>
+        <td style="color:var(--muted)">${m.notes ?? '—'}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteMaintenance(${m.id})">🗑️</button></td>
+      </tr>`).join('') : '<tr><td colspan="7" class="empty"><div class="empty-icon">🔧</div>Aucune maintenance</td></tr>';
+  } catch(e) { toast('Erreur maintenance', 'error'); }
+}
+
+async function openMaintenanceModal() {
+  const vehicles = await api('/vehicles');
+  document.getElementById('mVehicle').innerHTML = vehicles.map(v =>
+    `<option value="${v.id}">${v.nom} (${v.matricule ?? '—'})</option>`).join('');
+  openModal('maintenanceModal');
+}
+
+async function saveMaintenance() {
+  const body = {
+    vehicle:          { id: parseInt(document.getElementById('mVehicle').value) },
+    type:             document.getElementById('mType').value,
+    dateIntervention: document.getElementById('mDate').value,
+    kilometrage:      parseFloat(document.getElementById('mKm').value),
+    prochainKm:       parseFloat(document.getElementById('mNextKm').value),
+    notes:            document.getElementById('mNotes').value
+  };
+  try {
+    await api('/maintenances', 'POST', body);
+    closeModal('maintenanceModal');
+    loadMaintenance();
+    toast('Maintenance ajoutée ✓');
+  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+}
+
+async function deleteMaintenance(id) {
+  if (!confirm('Supprimer ?')) return;
+  try {
+    await api('/maintenances/' + id, 'DELETE');
+    loadMaintenance();
+    toast('Supprimé');
+  } catch(e) { toast('Erreur', 'error'); }
+}
+
+// ── INIT ─────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>
