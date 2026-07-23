@@ -155,6 +155,23 @@ tr:hover td { background: var(--bg); }
 .btn-ghost   { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 
+/* ── BI TABS & CHARTS ────────────────────────────── */
+.tabs { display: flex; gap: 4px; margin-bottom: 20px; background: var(--surface); padding: 4px; border-radius: 10px; border: 1px solid var(--border); width: fit-content; }
+.tab {
+  padding: 8px 18px; border-radius: 7px; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--muted);
+  transition: all .15s;
+}
+.tab.active { background: var(--accent); color: white; }
+.tab:hover:not(.active) { background: var(--bg); color: var(--text); }
+.tab-page { display: none; }
+.tab-page.active { display: block; }
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.chart-grid.full { grid-template-columns: 1fr; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+.chart-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; color: var(--text); }
+.chart-wrap { position: relative; height: 240px; }
+
 /* ── SCORE BAR ───────────────────────────────────── */
 .score-bar-wrap { display: flex; align-items: center; gap: 8px; }
 .score-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
@@ -228,9 +245,60 @@ input:focus, select:focus { outline: none; border-color: var(--accent); backgrou
 #toast.show { transform: translateY(0); opacity: 1; }
 #toast.success { background: var(--success); }
 #toast.error   { background: var(--danger); }
+
+/* ── PAGE TRANSITION (car animation) ─────────────── */
+.car-transition {
+  position: fixed;
+  top: 50%;
+  left: -60px;
+  transform: translateY(-50%);
+  font-size: 30px;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,.25));
+}
+.car-transition.animate {
+  animation: driveAcross .7s cubic-bezier(.4,0,.2,1) forwards;
+}
+@keyframes driveAcross {
+  0%   { left: -60px; opacity: 0; transform: translateY(-50%) scaleX(1); }
+  8%   { opacity: 1; }
+  50%  { transform: translateY(-56%) scaleX(1); }
+  55%  { transform: translateY(-44%) scaleX(1); }
+  92%  { opacity: 1; }
+  100% { left: 110%; opacity: 0; transform: translateY(-50%) scaleX(1); }
+}
+
+/* ── BI FILTER BAR ───────────────────────────────── */
+.bi-filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.bi-filter-bar select { width: auto; min-width: 180px; }
+.bi-filter-bar input[type="date"] { width: auto; padding: 7px 10px; }
+.period-btn {
+  padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.period-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.period-btn:hover:not(.active) { background: var(--bg); }
+.bi-period-label { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+/* ── POWER BI EMBED ───────────────────────────────── */
+.pbi-embed-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  height: calc(100vh - 130px);
+}
+.pbi-embed-wrap iframe { width: 100%; height: 100%; border: none; display: block; }
 </style>
 </head>
 <body>
+
+<!-- CAR TRANSITION -->
+<div class="car-transition" id="carTransition">🚗</div>
 
 <!-- SIDEBAR -->
 <aside id="sidebar">
@@ -243,9 +311,16 @@ input:focus, select:focus { outline: none; border-color: var(--accent); backgrou
     <div class="nav-item active" onclick="showPage('dashboard')">
       <span class="icon">📊</span> Dashboard
     </div>
+
+    <div class="nav-item" onclick="showPage('powerbi')">
+    <span class="icon">📈</span> Rapports BI
+    </div>
+
     <div class="nav-item" onclick="showPage('map')">
       <span class="icon">🗺️</span> Live Map
     </div>
+
+
 
     <div class="nav-section">Gestion</div>
     <div class="nav-item" onclick="showPage('vehicles')">
@@ -328,6 +403,17 @@ input:focus, select:focus { outline: none; border-color: var(--accent); backgrou
           <thead><tr><th>Nom</th><th>Matricule</th><th>Modèle</th><th>Type</th><th>Statut</th><th>Actions</th></tr></thead>
           <tbody id="vehicleTable"><tr><td colspan="6" class="empty">Chargement...</td></tr></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- PAGE: POWER BI EMBED -->
+    <div class="page" id="page-powerbi">
+      <div class="pbi-embed-wrap">
+        <iframe
+          title="Fleet BI Report"
+          src="https://app.powerbi.com/reportEmbed?reportId=89cfca46-783d-4061-90a5-8ecaa43dd493&autoAuth=true&ctid=e0281d2f-78fb-4f75-ab5b-ab4a5c4c14cb"
+          allowFullScreen="true">
+        </iframe>
       </div>
     </div>
 
@@ -491,10 +577,20 @@ const pageTitles = {
   chauffeurs:  'Gestion Chauffeurs',
   alerts:      'Alertes',
   scores:      'Scores & Classement',
-  maintenance: 'Maintenance'
+  maintenance: 'Maintenance',
+  powerbi:     'Rapports BI'
 };
 
+function triggerCarAnimation() {
+  const car = document.getElementById('carTransition');
+  if (!car) return;
+  car.classList.remove('animate');
+  void car.offsetWidth; // force reflow to restart the animation
+  car.classList.add('animate');
+}
+
 function showPage(name) {
+  triggerCarAnimation();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');

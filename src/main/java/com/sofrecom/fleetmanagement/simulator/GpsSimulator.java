@@ -26,16 +26,14 @@ public class GpsSimulator {
     @Autowired private PositionService positionService;
     @Autowired private VehicleRepository vehicleRepository;
 
-    private final Random random     = new Random();
+    private final Random random       = new Random();
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient http   = HttpClient.newHttpClient();
+    private final HttpClient http     = HttpClient.newHttpClient();
 
-    // Per vehicle state
     private final Map<Long, List<double[]>> vehicleRoutes = new HashMap<>();
     private final Map<Long, Integer>        positionIndex = new HashMap<>();
     private final Map<Long, Double>         speedMap      = new HashMap<>();
 
-    // Real Tunis road endpoints [startLng, startLat, endLng, endLat]
     private static final double[][] ROUTE_ENDPOINTS = {
             {10.1815, 36.8192, 10.1330, 36.8065},  // Bourguiba → Bardo
             {10.1660, 36.8190, 10.3248, 36.8509},  // Centre → Carthage
@@ -46,24 +44,21 @@ public class GpsSimulator {
             {10.1653, 36.8192, 10.1176, 36.9164},  // Tunis → Bizerte dir
             {10.2089, 36.8383, 10.1738, 36.8266},  // Berges du Lac
             {10.1653, 36.8192, 10.2976, 36.6914},  // Tunis → Nabeul dir
-            {10.1815, 36.8065, 10.1653, 36.8192},  // Bardo → Bourguiba (return)
+            {10.1815, 36.8065, 10.1653, 36.8192},  // Bardo → Bourguiba
     };
 
     @PostConstruct
     public void init() {
-        System.out.println("🗺️ GpsSimulator: fetching real road routes from OSRM...");
+        System.out.println("🗺️ GpsSimulator: fetching routes from OSRM...");
         List<Vehicle> vehicles = vehicleRepository.findAll();
         for (int i = 0; i < Math.min(vehicles.size(), ROUTE_ENDPOINTS.length); i++) {
             Vehicle v = vehicles.get(i);
             getOrFetchRoute(v.getId(), i);
-            try { Thread.sleep(1100); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
         }
         System.out.println("🚀 Routes ready — simulator starting");
     }
 
-    /**
-     * Calls OSRM API and returns list of [lat, lng] points along real roads
-     */
     private List<double[]> fetchRoute(double startLng, double startLat,
                                       double endLng,   double endLat) {
         try {
@@ -71,37 +66,31 @@ public class GpsSimulator {
                     "http://router.project-osrm.org/route/v1/driving/%f,%f;%f,%f?overview=full&geometries=geojson",
                     startLng, startLat, endLng, endLat
             );
-
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .GET().build();
-
+                    .uri(URI.create(url)).GET().build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-            JsonNode root = mapper.readTree(res.body());
+            JsonNode root   = mapper.readTree(res.body());
             JsonNode coords = root.path("routes").get(0)
-                    .path("geometry")
-                    .path("coordinates");
-
+                    .path("geometry").path("coordinates");
             List<double[]> points = new ArrayList<>();
             for (JsonNode point : coords) {
-                double lng = point.get(0).asDouble();
-                double lat = point.get(1).asDouble();
-                points.add(new double[]{lat, lng});
+                points.add(new double[]{
+                        point.get(1).asDouble(),  // lat
+                        point.get(0).asDouble()   // lng
+                });
             }
+            System.out.println("✅ Route loaded: " + points.size() + " points");
             return points;
-
         } catch (Exception e) {
-            System.err.println("OSRM error: " + e.getMessage());
+            System.err.println("⚠️ OSRM error: " + e.getMessage());
             return null;
         }
     }
 
     private List<double[]> getOrFetchRoute(Long vehicleId, int routeNum) {
         if (!vehicleRoutes.containsKey(vehicleId)) {
-            double[] ep = ROUTE_ENDPOINTS[routeNum % ROUTE_ENDPOINTS.length];
+            double[] ep    = ROUTE_ENDPOINTS[routeNum % ROUTE_ENDPOINTS.length];
             List<double[]> route = fetchRoute(ep[0], ep[1], ep[2], ep[3]);
-
-            // Fallback if OSRM fails
             if (route == null || route.isEmpty()) {
                 route = buildFallback(routeNum);
             }
@@ -111,54 +100,55 @@ public class GpsSimulator {
         return vehicleRoutes.get(vehicleId);
     }
 
-    // Simple fallback if OSRM is unreachable
     private List<double[]> buildFallback(int routeNum) {
         double[] ep = ROUTE_ENDPOINTS[routeNum % ROUTE_ENDPOINTS.length];
         List<double[]> pts = new ArrayList<>();
-        int steps = 30;
-        for (int i = 0; i <= steps; i++) {
-            double t   = (double) i / steps;
-            double lat = ep[1] + t * (ep[3] - ep[1]);
-            double lng = ep[0] + t * (ep[2] - ep[0]);
-            pts.add(new double[]{lat, lng});
+        for (int i = 0; i <= 30; i++) {
+            double t = (double) i / 30;
+            pts.add(new double[]{
+                    ep[1] + t * (ep[3] - ep[1]),
+                    ep[0] + t * (ep[2] - ep[0])
+            });
         }
         return pts;
     }
 
-    @Scheduled(fixedRate = 2000) // every 2s
+    @Scheduled(fixedRate = 2000)
     public void simulateGPS() {
         List<Vehicle> vehicles = vehicleRepository.findAll();
         if (vehicles.isEmpty()) return;
 
         for (int i = 0; i < vehicles.size(); i++) {
-            Vehicle vehicle = vehicles.get(i);
-            Long vehicleId  = vehicle.getId();
+            Vehicle vehicle  = vehicles.get(i);
+            Long vehicleId   = vehicle.getId();
 
             List<double[]> route = getOrFetchRoute(vehicleId, i);
             int idx = positionIndex.getOrDefault(vehicleId, 0);
 
             double[] point = route.get(idx);
-            double lat = point[0] + (random.nextDouble() - 0.5) * 0.00003; // ~3m noise
+            double lat = point[0] + (random.nextDouble() - 0.5) * 0.00003;
             double lng = point[1] + (random.nextDouble() - 0.5) * 0.00003;
 
-            // Advance — loop back at end
             positionIndex.put(vehicleId, (idx + 1) % route.size());
 
-            // Smooth speed change
+            // Smooth speed
             double prevSpeed = speedMap.getOrDefault(vehicleId, 50.0);
-            double delta     = (random.nextDouble() - 0.5) * 8;
-            double speed     = Math.max(20, Math.min(100, prevSpeed + delta));
+            double speed     = Math.max(20, Math.min(100,
+                    prevSpeed + (random.nextDouble() - 0.5) * 8));
             if (random.nextDouble() < 0.04) speed = 125 + random.nextDouble() * 20;
             speedMap.put(vehicleId, speed);
 
+            // Temperature
             double temp = 65 + random.nextDouble() * 20;
             if (random.nextDouble() < 0.04) temp = 92 + random.nextDouble() * 10;
 
-            positionService.savePosition(vehicleId,
-                    Math.round(lat * 1e6) / 1e6,
-                    Math.round(lng * 1e6) / 1e6,
+            positionService.savePosition(
+                    vehicleId,
+                    Math.round(lat   * 1e6) / 1e6,
+                    Math.round(lng   * 1e6) / 1e6,
                     Math.round(speed * 10.0) / 10.0,
-                    Math.round(temp  * 10.0) / 10.0);
+                    Math.round(temp  * 10.0) / 10.0
+            );
         }
     }
 }

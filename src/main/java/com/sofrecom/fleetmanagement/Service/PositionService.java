@@ -2,6 +2,7 @@ package com.sofrecom.fleetmanagement.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sofrecom.fleetmanagement.Repository.AlertRepository;
+import com.sofrecom.fleetmanagement.Repository.GeofenceRepository;
 import com.sofrecom.fleetmanagement.Repository.PositionRepository;
 import com.sofrecom.fleetmanagement.Repository.VehicleRepository;
 import com.sofrecom.fleetmanagement.model.Alert;
@@ -10,9 +11,6 @@ import com.sofrecom.fleetmanagement.model.Vehicle;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.sofrecom.fleetmanagement.Repository.GeofenceRepository;
-import com.sofrecom.fleetmanagement.model.Geofence;
-
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -24,24 +22,33 @@ import java.util.Optional;
 public class PositionService {
 
     private static final double SPEED_LIMIT = 120.0;
-    private static final double TEMP_LIMIT = 90.0;
+    private static final double TEMP_LIMIT  = 90.0;
+
+    // Cooldown
+    private final Map<String, Long> lastGeofenceAlert = new HashMap<>();
+    private final Map<Long, Long>   lastSpeedAlert    = new HashMap<>();
+    private final Map<Long, Long>   lastTempAlert     = new HashMap<>();
+    private static final long SPEED_COOLDOWN_MS    = 2 * 60 * 1000;
+    private static final long TEMP_COOLDOWN_MS     = 2 * 60 * 1000;
+    private static final long GEOFENCE_COOLDOWN_MS = 5 * 60 * 1000;
 
     private final PositionRepository positionRepository;
-    private final VehicleRepository vehicleRepository;
-    private final AlertRepository alertRepository;
+    private final VehicleRepository  vehicleRepository;
+    private final AlertRepository    alertRepository;
+    private final GeofenceRepository geofenceRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final GeofenceRepository geofenceRepository;
 
     public PositionService(PositionRepository positionRepository,
                            VehicleRepository vehicleRepository,
                            AlertRepository alertRepository,
-                           RedisTemplate<String, String> redisTemplate, GeofenceRepository geofenceRepository) {
+                           GeofenceRepository geofenceRepository,
+                           RedisTemplate<String, String> redisTemplate) {
         this.positionRepository = positionRepository;
-        this.vehicleRepository = vehicleRepository;
-        this.alertRepository = alertRepository;
-        this.redisTemplate = redisTemplate;
+        this.vehicleRepository  = vehicleRepository;
+        this.alertRepository    = alertRepository;
         this.geofenceRepository = geofenceRepository;
+        this.redisTemplate      = redisTemplate;
     }
 
     @Transactional
@@ -63,37 +70,60 @@ public class PositionService {
         positionRepository.save(position);
 
         updateLivePosition(vehicleId, lat, lng, speed, temperature, timestamp);
-        checkAlerts(vehicle, lat, lng, speed, temperature, timestamp); // ← زيد lat, lng
+        checkAlerts(vehicle, lat, lng, speed, temperature, timestamp);
     }
 
     private void checkAlerts(Vehicle vehicle, Double lat, Double lng,
                              Double speed, Double temperature,
                              LocalDateTime timestamp) {
+        long now = System.currentTimeMillis();
 
-        // Speed
+        // Speed alert
         if (speed != null && speed > SPEED_LIMIT) {
-            saveAlert(vehicle, "SPEED", speed, timestamp);
-            System.out.println("⚠️ SPEED ALERT - Vehicle " + vehicle.getId() + " : " + speed + " km/h");
+            Long last = lastSpeedAlert.get(vehicle.getId());
+            if (last == null || now - last > SPEED_COOLDOWN_MS) {
+                saveAlert(vehicle, "SPEED", speed, timestamp);
+                lastSpeedAlert.put(vehicle.getId(), now);
+                System.out.println("⚠️ SPEED - Vehicle " + vehicle.getId() + " : " + speed + " km/h");
+            }
         }
 
-        // Temperature
+        // Temp alert
         if (temperature != null && temperature > TEMP_LIMIT) {
-            saveAlert(vehicle, "TEMPERATURE", temperature, timestamp);
-            System.out.println("⚠️ TEMP ALERT - Vehicle " + vehicle.getId() + " : " + temperature + "°C");
+            Long last = lastTempAlert.get(vehicle.getId());
+            if (last == null || now - last > TEMP_COOLDOWN_MS) {
+                saveAlert(vehicle, "TEMPERATURE", temperature, timestamp);
+                lastTempAlert.put(vehicle.getId(), now);
+                System.out.println("⚠️ TEMP - Vehicle " + vehicle.getId() + " : " + temperature + "°C");
+            }
         }
 
-        // Geofence
+        // Geofence alert
         if (lat != null && lng != null) {
             geofenceRepository.findAll().forEach(geo -> {
                 double distance = calculateDistance(lat, lng,
                         geo.getLatCenter(), geo.getLngCenter());
                 if (distance > geo.getRadiusKm()) {
-                    saveAlert(vehicle, "GEOFENCE", distance, timestamp);
-                    System.out.println("📍 GEOFENCE ALERT - Vehicle "
-                            + vehicle.getId() + " outside " + geo.getNom());
+                    String key = vehicle.getId() + "_" + geo.getId();
+                    Long last  = lastGeofenceAlert.get(key);
+                    if (last == null || now - last > GEOFENCE_COOLDOWN_MS) {
+                        saveAlert(vehicle, "GEOFENCE", distance, timestamp);
+                        lastGeofenceAlert.put(key, now);
+                        System.out.println("📍 GEOFENCE - Vehicle " + vehicle.getId()
+                                + " outside " + geo.getNom());
+                    }
                 }
             });
         }
+    }
+
+    private void saveAlert(Vehicle vehicle, String type, Double value, LocalDateTime timestamp) {
+        Alert alert = new Alert();
+        alert.setVehicle(vehicle);
+        alert.setType(type);
+        alert.setValeur(value);
+        alert.setTimestamp(timestamp);
+        alertRepository.save(alert);
     }
 
     private double calculateDistance(double lat1, double lng1,
@@ -120,7 +150,6 @@ public class PositionService {
 
     public Map<String, String> getAllLivePositions() {
         Map<String, String> positions = new HashMap<>();
-
         try {
             var keys = redisTemplate.keys("vehicle:live:*");
             if (keys != null) {
@@ -131,7 +160,6 @@ public class PositionService {
         } catch (Exception e) {
             System.err.println("Redis error: " + e.getMessage());
         }
-
         return positions;
     }
 
@@ -148,13 +176,12 @@ public class PositionService {
                                     LocalDateTime timestamp) {
         try {
             Map<String, Object> liveData = new HashMap<>();
-            liveData.put("vehicleId", vehicleId);
-            liveData.put("lat", lat);
-            liveData.put("lng", lng);
-            liveData.put("speed", speed);
-            liveData.put("temperature", temperature);
-            liveData.put("timestamp", timestamp.toString());
-
+            liveData.put("vehicleId",    vehicleId);
+            liveData.put("lat",          lat);
+            liveData.put("lng",          lng);
+            liveData.put("speed",        speed);
+            liveData.put("temperature",  temperature);
+            liveData.put("timestamp",    timestamp.toString());
             redisTemplate.opsForValue().set(
                     livePositionKey(vehicleId),
                     objectMapper.writeValueAsString(liveData)
@@ -162,27 +189,6 @@ public class PositionService {
         } catch (Exception e) {
             System.err.println("Redis error: " + e.getMessage());
         }
-    }
-
-    private void checkAlerts(Vehicle vehicle, Double speed, Double temperature, LocalDateTime timestamp) {
-        if (speed != null && speed > SPEED_LIMIT) {
-            saveAlert(vehicle, "SPEED", speed, timestamp);
-            System.out.println("SPEED ALERT - Vehicle " + vehicle.getId() + " : " + speed + " km/h");
-        }
-
-        if (temperature != null && temperature > TEMP_LIMIT) {
-            saveAlert(vehicle, "TEMPERATURE", temperature, timestamp);
-            System.out.println("TEMP ALERT - Vehicle " + vehicle.getId() + " : " + temperature + " C");
-        }
-    }
-
-    private void saveAlert(Vehicle vehicle, String type, Double value, LocalDateTime timestamp) {
-        Alert alert = new Alert();
-        alert.setVehicle(vehicle);
-        alert.setType(type);
-        alert.setValeur(value);
-        alert.setTimestamp(timestamp);
-        alertRepository.save(alert);
     }
 
     private String livePositionKey(Long vehicleId) {
