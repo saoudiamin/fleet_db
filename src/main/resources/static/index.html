@@ -564,400 +564,400 @@ input:focus, select:focus { outline: none; border-color: var(--accent); backgrou
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const API = 'http://localhost:8081/api';
-let allVehicles = [];
-let map, markers = {};
-let mapInitialized = false;
+  const API = '/api';
+  let allVehicles = [];
+  let map, markers = {};
+  let mapInitialized = false;
 
-// ── NAVIGATION ───────────────────────────────────
-const pageTitles = {
-  dashboard:   'Dashboard',
-  map:         'Live Map',
-  vehicles:    'Gestion Véhicules',
-  chauffeurs:  'Gestion Chauffeurs',
-  alerts:      'Alertes',
-  scores:      'Scores & Classement',
-  maintenance: 'Maintenance',
-  powerbi:     'Rapports BI'
-};
+  // ── NAVIGATION ───────────────────────────────────
+  const pageTitles = {
+    dashboard:   'Dashboard',
+    map:         'Live Map',
+    vehicles:    'Gestion Véhicules',
+    chauffeurs:  'Gestion Chauffeurs',
+    alerts:      'Alertes',
+    scores:      'Scores & Classement',
+    maintenance: 'Maintenance',
+    powerbi:     'Rapports BI'
+  };
 
-function triggerCarAnimation() {
-  const car = document.getElementById('carTransition');
-  if (!car) return;
-  car.classList.remove('animate');
-  void car.offsetWidth; // force reflow to restart the animation
-  car.classList.add('animate');
-}
-
-function showPage(name) {
-  triggerCarAnimation();
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n => {
-    if (n.textContent.toLowerCase().includes(pageTitles[name].split(' ')[0].toLowerCase())) {
-      n.classList.add('active');
-    }
-  });
-  document.getElementById('pageTitle').textContent = pageTitles[name];
-  document.getElementById('topbarActions').innerHTML = '';
-
-  if (name === 'dashboard')   loadDashboard();
-  if (name === 'map')         initMap();
-  if (name === 'vehicles')    loadVehicles();
-  if (name === 'chauffeurs')  loadChauffeurs();
-  if (name === 'alerts')      loadAlerts();
-  if (name === 'scores')      loadScores();
-  if (name === 'maintenance') loadMaintenance();
-}
-
-// ── API HELPERS ──────────────────────────────────
-async function api(path, method = 'GET', body = null) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(API + path, opts);
-  if (!res.ok) throw new Error(await res.text());
-  if (res.status === 204) return null;
-  return res.json();
-}
-
-// ── TOAST ────────────────────────────────────────
-function toast(msg, type = 'success') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'show ' + type;
-  setTimeout(() => t.className = '', 3000);
-}
-
-// ── MODAL ────────────────────────────────────────
-function openModal(id)  { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-
-// ── BADGE ────────────────────────────────────────
-function badge(text, cls) {
-  return `<span class="badge ${cls.toLowerCase()}">${text}</span>`;
-}
-function statBadge(s) {
-  const map = { ACTIF: 'actif', ARRETE: 'arrete', MAINTENANCE: 'maintenance' };
-  return badge(s, map[s] || '');
-}
-function alertBadge(t) {
-  const map = { SPEED: 'speed', TEMPERATURE: 'temperature', GEOFENCE: 'geofence' };
-  const label = { SPEED: '🚗 Vitesse', TEMPERATURE: '🌡️ Temp', GEOFENCE: '📍 Zone' };
-  return badge(label[t] || t, map[t] || '');
-}
-
-// ── SCORE COLOR ──────────────────────────────────
-function scoreColor(v) {
-  if (v >= 80) return 'var(--success)';
-  if (v >= 60) return 'var(--warn)';
-  return 'var(--danger)';
-}
-function scoreBar(v) {
-  return `<div class="score-bar-wrap">
-    <div class="score-bar"><div class="score-bar-fill" style="width:${v}%;background:${scoreColor(v)}"></div></div>
-    <span class="score-label" style="color:${scoreColor(v)}">${v}</span>
-  </div>`;
-}
-
-// ── FORMAT DATE ──────────────────────────────────
-function fmtDate(ts) {
-  if (!ts) return '—';
-  return new Date(ts).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-}
-
-// ── DASHBOARD ────────────────────────────────────
-async function loadDashboard() {
-  try {
-    const [kpis, alerts] = await Promise.all([
-      api('/dashboard/kpis'),
-      api('/alerts')
-    ]);
-    document.getElementById('kpi-total').textContent  = kpis.totalVehicles  ?? '—';
-    document.getElementById('kpi-actif').textContent  = kpis.actifs         ?? '—';
-    document.getElementById('kpi-maint').textContent  = kpis.maintenance    ?? '—';
-    document.getElementById('kpi-alerts').textContent = kpis.totalAlerts    ?? '—';
-    document.getElementById('kpi-speed').textContent  = kpis.speedAlerts    ?? '—';
-    document.getElementById('kpi-temp').textContent   = kpis.tempAlerts     ?? '—';
-    document.getElementById('kpi-trajets').textContent= kpis.totalTrajets   ?? '—';
-
-    const recent = alerts.slice(-10).reverse();
-    document.getElementById('dashAlerts').innerHTML = recent.length ? recent.map(a => `
-      <tr>
-        <td><strong>V-${a.vehicleId ?? a.vehicle?.id ?? '?'}</strong></td>
-        <td>${alertBadge(a.type)}</td>
-        <td style="font-family:'JetBrains Mono',monospace">${a.valeur?.toFixed(1) ?? '—'}</td>
-        <td style="color:var(--muted)">${fmtDate(a.timestamp)}</td>
-      </tr>`).join('') : '<tr><td colspan="4" class="empty">Aucune alerte</td></tr>';
-  } catch(e) {
-    toast('Erreur API: ' + e.message, 'error');
+  function triggerCarAnimation() {
+    const car = document.getElementById('carTransition');
+    if (!car) return;
+    car.classList.remove('animate');
+    void car.offsetWidth; // force reflow to restart the animation
+    car.classList.add('animate');
   }
-}
 
-// ── LIVE MAP ─────────────────────────────────────
-function initMap() {
-  if (!mapInitialized) {
-    map = L.map('map').setView([36.8065, 10.1815], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    mapInitialized = true;
-  }
-  updateMapPositions();
-  if (window._mapInterval) clearInterval(window._mapInterval);
-  window._mapInterval = setInterval(updateMapPositions, 3000);
-}
-
-async function updateMapPositions() {
-  try {
-    const data = await api('/positions/live');
-    Object.entries(data).forEach(([key, raw]) => {
-      const pos = JSON.parse(raw);
-      const id  = key.replace('vehicle:live:', '');
-      const lat = parseFloat(pos.lat), lng = parseFloat(pos.lng);
-      const spd = parseFloat(pos.speed);
-      const color = spd > 120 ? '#DC2626' : spd > 80 ? '#D97706' : '#16A34A';
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 0 6px ${color}"></div>`,
-        iconSize: [12, 12], iconAnchor: [6, 6]
-      });
-      const popup = `<b>Vehicle #${id}</b><br>Vitesse: ${spd.toFixed(1)} km/h<br>Temp: ${parseFloat(pos.temperature).toFixed(1)}°C`;
-      if (markers[id]) {
-        markers[id].setLatLng([lat, lng]).setIcon(icon).setPopupContent(popup);
-      } else {
-        markers[id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup);
+  function showPage(name) {
+    triggerCarAnimation();
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('page-' + name).classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(n => {
+      if (n.textContent.toLowerCase().includes(pageTitles[name].split(' ')[0].toLowerCase())) {
+        n.classList.add('active');
       }
     });
-  } catch(e) { console.error(e); }
-}
+    document.getElementById('pageTitle').textContent = pageTitles[name];
+    document.getElementById('topbarActions').innerHTML = '';
 
-// ── VEHICLES ─────────────────────────────────────
-async function loadVehicles() {
-  try {
-    allVehicles = await api('/vehicles');
-    renderVehicles(allVehicles);
-  } catch(e) { toast('Erreur chargement véhicules', 'error'); }
-}
+    if (name === 'dashboard')   loadDashboard();
+    if (name === 'map')         initMap();
+    if (name === 'vehicles')    loadVehicles();
+    if (name === 'chauffeurs')  loadChauffeurs();
+    if (name === 'alerts')      loadAlerts();
+    if (name === 'scores')      loadScores();
+    if (name === 'maintenance') loadMaintenance();
+  }
 
-function renderVehicles(list) {
-  document.getElementById('vehicleTable').innerHTML = list.length ? list.map(v => `
-    <tr>
-      <td><strong>${v.nom ?? '—'}</strong></td>
-      <td style="font-family:'JetBrains Mono',monospace">${v.matricule ?? '—'}</td>
-      <td>${v.modele ?? '—'}</td>
-      <td>${v.type ?? '—'}</td>
-      <td>${statBadge(v.statut ?? 'ARRETE')}</td>
-      <td>
-        <button class="btn btn-ghost btn-sm" onclick="editVehicle(${v.id})">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteVehicle(${v.id})">🗑️</button>
-      </td>
-    </tr>`).join('') : '<tr><td colspan="6" class="empty"><div class="empty-icon">🚙</div>Aucun véhicule</td></tr>';
-}
+  // ── API HELPERS ──────────────────────────────────
+  async function api(path, method = 'GET', body = null) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(API + path, opts);
+    if (!res.ok) throw new Error(await res.text());
+    if (res.status === 204) return null;
+    return res.json();
+  }
 
-function filterVehicles() {
-  const q = document.getElementById('vSearch').value.toLowerCase();
-  const s = document.getElementById('vStatut').value;
-  renderVehicles(allVehicles.filter(v =>
-    (!q || (v.nom+v.matricule+v.modele).toLowerCase().includes(q)) &&
-    (!s || v.statut === s)
-  ));
-}
+  // ── TOAST ────────────────────────────────────────
+  function toast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show ' + type;
+    setTimeout(() => t.className = '', 3000);
+  }
 
-function openVehicleModal(v = null) {
-  document.getElementById('vehicleModalTitle').textContent = v ? 'Modifier véhicule' : 'Ajouter un véhicule';
-  document.getElementById('vId').value       = v?.id ?? '';
-  document.getElementById('vNom').value      = v?.nom ?? '';
-  document.getElementById('vMatricule').value= v?.matricule ?? '';
-  document.getElementById('vModele').value   = v?.modele ?? '';
-  document.getElementById('vType').value     = v?.type ?? 'Camion';
-  document.getElementById('vStatutForm').value = v?.statut ?? 'ACTIF';
-  openModal('vehicleModal');
-}
+  // ── MODAL ────────────────────────────────────────
+  function openModal(id)  { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
-function editVehicle(id) {
-  const v = allVehicles.find(x => x.id === id);
-  if (v) openVehicleModal(v);
-}
+  // ── BADGE ────────────────────────────────────────
+  function badge(text, cls) {
+    return `<span class="badge ${cls.toLowerCase()}">${text}</span>`;
+  }
+  function statBadge(s) {
+    const map = { ACTIF: 'actif', ARRETE: 'arrete', MAINTENANCE: 'maintenance' };
+    return badge(s, map[s] || '');
+  }
+  function alertBadge(t) {
+    const map = { SPEED: 'speed', TEMPERATURE: 'temperature', GEOFENCE: 'geofence' };
+    const label = { SPEED: '🚗 Vitesse', TEMPERATURE: '🌡️ Temp', GEOFENCE: '📍 Zone' };
+    return badge(label[t] || t, map[t] || '');
+  }
 
-async function saveVehicle() {
-  const id = document.getElementById('vId').value;
-  const body = {
-    nom:       document.getElementById('vNom').value,
-    matricule: document.getElementById('vMatricule').value,
-    modele:    document.getElementById('vModele').value,
-    type:      document.getElementById('vType').value,
-    statut:    document.getElementById('vStatutForm').value,
-    client:    { id: 1 }
-  };
-  try {
-    if (id) await api('/vehicles/' + id, 'PUT', body);
-    else    await api('/vehicles', 'POST', body);
-    closeModal('vehicleModal');
-    loadVehicles();
-    toast(id ? 'Véhicule modifié ✓' : 'Véhicule ajouté ✓');
-  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
-}
+  // ── SCORE COLOR ──────────────────────────────────
+  function scoreColor(v) {
+    if (v >= 80) return 'var(--success)';
+    if (v >= 60) return 'var(--warn)';
+    return 'var(--danger)';
+  }
+  function scoreBar(v) {
+    return `<div class="score-bar-wrap">
+      <div class="score-bar"><div class="score-bar-fill" style="width:${v}%;background:${scoreColor(v)}"></div></div>
+      <span class="score-label" style="color:${scoreColor(v)}">${v}</span>
+    </div>`;
+  }
 
-async function deleteVehicle(id) {
-  if (!confirm('Supprimer ce véhicule ?')) return;
-  try {
-    await api('/vehicles/' + id, 'DELETE');
-    loadVehicles();
-    toast('Véhicule supprimé');
-  } catch(e) { toast('Erreur suppression', 'error'); }
-}
+  // ── FORMAT DATE ──────────────────────────────────
+  function fmtDate(ts) {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  }
 
-// ── CHAUFFEURS ────────────────────────────────────
-async function loadChauffeurs() {
-  try {
-    const list = await api('/chauffeurs');
-    document.getElementById('chauffeurTable').innerHTML = list.length ? list.map(c => `
+  // ── DASHBOARD ────────────────────────────────────
+  async function loadDashboard() {
+    try {
+      const [kpis, alerts] = await Promise.all([
+        api('/dashboard/kpis'),
+        api('/alerts')
+      ]);
+      document.getElementById('kpi-total').textContent  = kpis.totalVehicles  ?? '—';
+      document.getElementById('kpi-actif').textContent  = kpis.actifs         ?? '—';
+      document.getElementById('kpi-maint').textContent  = kpis.maintenance    ?? '—';
+      document.getElementById('kpi-alerts').textContent = kpis.totalAlerts    ?? '—';
+      document.getElementById('kpi-speed').textContent  = kpis.speedAlerts    ?? '—';
+      document.getElementById('kpi-temp').textContent   = kpis.tempAlerts     ?? '—';
+      document.getElementById('kpi-trajets').textContent= kpis.totalTrajets   ?? '—';
+
+      const recent = alerts.slice(-10).reverse();
+      document.getElementById('dashAlerts').innerHTML = recent.length ? recent.map(a => `
+        <tr>
+          <td><strong>V-${a.vehicleId ?? a.vehicle?.id ?? '?'}</strong></td>
+          <td>${alertBadge(a.type)}</td>
+          <td style="font-family:'JetBrains Mono',monospace">${a.valeur?.toFixed(1) ?? '—'}</td>
+          <td style="color:var(--muted)">${fmtDate(a.timestamp)}</td>
+        </tr>`).join('') : '<tr><td colspan="4" class="empty">Aucune alerte</td></tr>';
+    } catch(e) {
+      toast('Erreur API: ' + e.message, 'error');
+    }
+  }
+
+  // ── LIVE MAP ─────────────────────────────────────
+  function initMap() {
+    if (!mapInitialized) {
+      map = L.map('map').setView([36.8065, 10.1815], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      mapInitialized = true;
+    }
+    updateMapPositions();
+    if (window._mapInterval) clearInterval(window._mapInterval);
+    window._mapInterval = setInterval(updateMapPositions, 3000);
+  }
+
+  async function updateMapPositions() {
+    try {
+      const data = await api('/positions/live');
+      Object.entries(data).forEach(([key, raw]) => {
+        const pos = JSON.parse(raw);
+        const id  = key.replace('vehicle:live:', '');
+        const lat = parseFloat(pos.lat), lng = parseFloat(pos.lng);
+        const spd = parseFloat(pos.speed);
+        const color = spd > 120 ? '#DC2626' : spd > 80 ? '#D97706' : '#16A34A';
+        const icon = L.divIcon({
+          className: '',
+          html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 0 6px ${color}"></div>`,
+          iconSize: [12, 12], iconAnchor: [6, 6]
+        });
+        const popup = `<b>Vehicle #${id}</b><br>Vitesse: ${spd.toFixed(1)} km/h<br>Temp: ${parseFloat(pos.temperature).toFixed(1)}°C`;
+        if (markers[id]) {
+          markers[id].setLatLng([lat, lng]).setIcon(icon).setPopupContent(popup);
+        } else {
+          markers[id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup);
+        }
+      });
+    } catch(e) { console.error(e); }
+  }
+
+  // ── VEHICLES ─────────────────────────────────────
+  async function loadVehicles() {
+    try {
+      allVehicles = await api('/vehicles');
+      renderVehicles(allVehicles);
+    } catch(e) { toast('Erreur chargement véhicules', 'error'); }
+  }
+
+  function renderVehicles(list) {
+    document.getElementById('vehicleTable').innerHTML = list.length ? list.map(v => `
       <tr>
-        <td><strong>${c.nom ?? '—'}</strong></td>
-        <td>${c.prenom ?? '—'}</td>
-        <td>${c.telephone ?? '—'}</td>
-        <td style="font-family:'JetBrains Mono',monospace">${c.permis ?? '—'}</td>
-        <td>${c.vehicle ? 'V-' + c.vehicle.id : '—'}</td>
+        <td><strong>${v.nom ?? '—'}</strong></td>
+        <td style="font-family:'JetBrains Mono',monospace">${v.matricule ?? '—'}</td>
+        <td>${v.modele ?? '—'}</td>
+        <td>${v.type ?? '—'}</td>
+        <td>${statBadge(v.statut ?? 'ARRETE')}</td>
         <td>
-          <button class="btn btn-danger btn-sm" onclick="deleteChauffeur(${c.id})">🗑️</button>
+          <button class="btn btn-ghost btn-sm" onclick="editVehicle(${v.id})">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteVehicle(${v.id})">🗑️</button>
         </td>
-      </tr>`).join('') : '<tr><td colspan="6" class="empty"><div class="empty-icon">👤</div>Aucun chauffeur</td></tr>';
-  } catch(e) { toast('Erreur chauffeurs', 'error'); }
-}
+      </tr>`).join('') : '<tr><td colspan="6" class="empty"><div class="empty-icon">🚙</div>Aucun véhicule</td></tr>';
+  }
 
-async function openChauffeurModal() {
-  const vehicles = await api('/vehicles');
-  document.getElementById('cVehicle').innerHTML = vehicles.map(v =>
-    `<option value="${v.id}">${v.nom} (${v.matricule ?? '—'})</option>`
-  ).join('');
-  document.getElementById('cId').value = '';
-  document.getElementById('cNom').value = '';
-  document.getElementById('cPrenom').value = '';
-  document.getElementById('cTel').value = '';
-  document.getElementById('cPermis').value = '';
-  openModal('chauffeurModal');
-}
+  function filterVehicles() {
+    const q = document.getElementById('vSearch').value.toLowerCase();
+    const s = document.getElementById('vStatut').value;
+    renderVehicles(allVehicles.filter(v =>
+      (!q || (v.nom+v.matricule+v.modele).toLowerCase().includes(q)) &&
+      (!s || v.statut === s)
+    ));
+  }
 
-async function saveChauffeur() {
-  const body = {
-    nom:       document.getElementById('cNom').value,
-    prenom:    document.getElementById('cPrenom').value,
-    telephone: document.getElementById('cTel').value,
-    permis:    document.getElementById('cPermis').value,
-    vehicle:   { id: parseInt(document.getElementById('cVehicle').value) }
-  };
-  try {
-    await api('/chauffeurs', 'POST', body);
-    closeModal('chauffeurModal');
-    loadChauffeurs();
-    toast('Chauffeur ajouté ✓');
-  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
-}
+  function openVehicleModal(v = null) {
+    document.getElementById('vehicleModalTitle').textContent = v ? 'Modifier véhicule' : 'Ajouter un véhicule';
+    document.getElementById('vId').value       = v?.id ?? '';
+    document.getElementById('vNom').value      = v?.nom ?? '';
+    document.getElementById('vMatricule').value= v?.matricule ?? '';
+    document.getElementById('vModele').value   = v?.modele ?? '';
+    document.getElementById('vType').value     = v?.type ?? 'Camion';
+    document.getElementById('vStatutForm').value = v?.statut ?? 'ACTIF';
+    openModal('vehicleModal');
+  }
 
-async function deleteChauffeur(id) {
-  if (!confirm('Supprimer ce chauffeur ?')) return;
-  try {
-    await api('/chauffeurs/' + id, 'DELETE');
-    loadChauffeurs();
-    toast('Chauffeur supprimé');
-  } catch(e) { toast('Erreur suppression', 'error'); }
-}
+  function editVehicle(id) {
+    const v = allVehicles.find(x => x.id === id);
+    if (v) openVehicleModal(v);
+  }
 
-// ── ALERTS ───────────────────────────────────────
-async function loadAlerts() {
-  const type = document.getElementById('aType')?.value ?? '';
-  try {
-    const list = await api(type ? '/alerts/type/' + type : '/alerts');
-    document.getElementById('alertCount').textContent = list.length + ' alertes';
-    document.getElementById('alertTable').innerHTML = list.length ? [...list].reverse().slice(0,100).map(a => `
-      <tr>
-        <td><strong>V-${a.vehicle?.id ?? '?'}</strong></td>
-        <td>${alertBadge(a.type)}</td>
-        <td style="font-family:'JetBrains Mono',monospace">${a.valeur?.toFixed(2) ?? '—'}</td>
-        <td style="color:var(--muted)">${fmtDate(a.timestamp)}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="deleteAlert(${a.id})">🗑️</button></td>
-      </tr>`).join('') : '<tr><td colspan="5" class="empty"><div class="empty-icon">✅</div>Aucune alerte</td></tr>';
-  } catch(e) { toast('Erreur alertes', 'error'); }
-}
+  async function saveVehicle() {
+    const id = document.getElementById('vId').value;
+    const body = {
+      nom:       document.getElementById('vNom').value,
+      matricule: document.getElementById('vMatricule').value,
+      modele:    document.getElementById('vModele').value,
+      type:      document.getElementById('vType').value,
+      statut:    document.getElementById('vStatutForm').value,
+      client:    { id: 1 }
+    };
+    try {
+      if (id) await api('/vehicles/' + id, 'PUT', body);
+      else    await api('/vehicles', 'POST', body);
+      closeModal('vehicleModal');
+      loadVehicles();
+      toast(id ? 'Véhicule modifié ✓' : 'Véhicule ajouté ✓');
+    } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+  }
 
-async function deleteAlert(id) {
-  try {
-    await api('/alerts/' + id, 'DELETE');
-    loadAlerts();
-    toast('Alerte supprimée');
-  } catch(e) { toast('Erreur', 'error'); }
-}
+  async function deleteVehicle(id) {
+    if (!confirm('Supprimer ce véhicule ?')) return;
+    try {
+      await api('/vehicles/' + id, 'DELETE');
+      loadVehicles();
+      toast('Véhicule supprimé');
+    } catch(e) { toast('Erreur suppression', 'error'); }
+  }
 
-// ── SCORES ───────────────────────────────────────
-async function loadScores() {
-  try {
+  // ── CHAUFFEURS ────────────────────────────────────
+  async function loadChauffeurs() {
+    try {
+      const list = await api('/chauffeurs');
+      document.getElementById('chauffeurTable').innerHTML = list.length ? list.map(c => `
+        <tr>
+          <td><strong>${c.nom ?? '—'}</strong></td>
+          <td>${c.prenom ?? '—'}</td>
+          <td>${c.telephone ?? '—'}</td>
+          <td style="font-family:'JetBrains Mono',monospace">${c.permis ?? '—'}</td>
+          <td>${c.vehicle ? 'V-' + c.vehicle.id : '—'}</td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="deleteChauffeur(${c.id})">🗑️</button>
+          </td>
+        </tr>`).join('') : '<tr><td colspan="6" class="empty"><div class="empty-icon">👤</div>Aucun chauffeur</td></tr>';
+    } catch(e) { toast('Erreur chauffeurs', 'error'); }
+  }
+
+  async function openChauffeurModal() {
     const vehicles = await api('/vehicles');
-    const scores = await Promise.all(vehicles.map(v => api('/scores/chauffeur/' + v.id)));
-    const sorted = scores.sort((a, b) => b.scoreGlobal - a.scoreGlobal);
-    const medals = ['🥇', '🥈', '🥉'];
-    document.getElementById('scoreTable').innerHTML = sorted.map((s, i) => `
-      <tr>
-        <td style="font-size:18px">${medals[i] ?? i+1}</td>
-        <td><strong>Vehicle #${s.vehicleId}</strong></td>
-        <td>${scoreBar(s.scoreGlobal)}</td>
-        <td>${scoreBar(s.securite)}</td>
-        <td>${scoreBar(s.freinage)}</td>
-        <td>${scoreBar(s.discipline)}</td>
-      </tr>`).join('');
-  } catch(e) { toast('Erreur scores', 'error'); }
-}
+    document.getElementById('cVehicle').innerHTML = vehicles.map(v =>
+      `<option value="${v.id}">${v.nom} (${v.matricule ?? '—'})</option>`
+    ).join('');
+    document.getElementById('cId').value = '';
+    document.getElementById('cNom').value = '';
+    document.getElementById('cPrenom').value = '';
+    document.getElementById('cTel').value = '';
+    document.getElementById('cPermis').value = '';
+    openModal('chauffeurModal');
+  }
 
-// ── MAINTENANCE ──────────────────────────────────
-async function loadMaintenance() {
-  try {
-    const list = await api('/maintenances');
-    document.getElementById('maintenanceTable').innerHTML = list.length ? list.map(m => `
-      <tr>
-        <td><strong>V-${m.vehicle?.id ?? '?'}</strong></td>
-        <td>${m.type ?? '—'}</td>
-        <td style="color:var(--muted)">${fmtDate(m.dateIntervention)}</td>
-        <td style="font-family:'JetBrains Mono',monospace">${m.kilometrage?.toLocaleString() ?? '—'} km</td>
-        <td style="font-family:'JetBrains Mono',monospace">${m.prochainKm?.toLocaleString() ?? '—'} km</td>
-        <td style="color:var(--muted)">${m.notes ?? '—'}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="deleteMaintenance(${m.id})">🗑️</button></td>
-      </tr>`).join('') : '<tr><td colspan="7" class="empty"><div class="empty-icon">🔧</div>Aucune maintenance</td></tr>';
-  } catch(e) { toast('Erreur maintenance', 'error'); }
-}
+  async function saveChauffeur() {
+    const body = {
+      nom:       document.getElementById('cNom').value,
+      prenom:    document.getElementById('cPrenom').value,
+      telephone: document.getElementById('cTel').value,
+      permis:    document.getElementById('cPermis').value,
+      vehicle:   { id: parseInt(document.getElementById('cVehicle').value) }
+    };
+    try {
+      await api('/chauffeurs', 'POST', body);
+      closeModal('chauffeurModal');
+      loadChauffeurs();
+      toast('Chauffeur ajouté ✓');
+    } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+  }
 
-async function openMaintenanceModal() {
-  const vehicles = await api('/vehicles');
-  document.getElementById('mVehicle').innerHTML = vehicles.map(v =>
-    `<option value="${v.id}">${v.nom} (${v.matricule ?? '—'})</option>`).join('');
-  openModal('maintenanceModal');
-}
+  async function deleteChauffeur(id) {
+    if (!confirm('Supprimer ce chauffeur ?')) return;
+    try {
+      await api('/chauffeurs/' + id, 'DELETE');
+      loadChauffeurs();
+      toast('Chauffeur supprimé');
+    } catch(e) { toast('Erreur suppression', 'error'); }
+  }
 
-async function saveMaintenance() {
-  const body = {
-    vehicle:          { id: parseInt(document.getElementById('mVehicle').value) },
-    type:             document.getElementById('mType').value,
-    dateIntervention: document.getElementById('mDate').value,
-    kilometrage:      parseFloat(document.getElementById('mKm').value),
-    prochainKm:       parseFloat(document.getElementById('mNextKm').value),
-    notes:            document.getElementById('mNotes').value
-  };
-  try {
-    await api('/maintenances', 'POST', body);
-    closeModal('maintenanceModal');
-    loadMaintenance();
-    toast('Maintenance ajoutée ✓');
-  } catch(e) { toast('Erreur: ' + e.message, 'error'); }
-}
+  // ── ALERTS ───────────────────────────────────────
+  async function loadAlerts() {
+    const type = document.getElementById('aType')?.value ?? '';
+    try {
+      const list = await api(type ? '/alerts/type/' + type : '/alerts');
+      document.getElementById('alertCount').textContent = list.length + ' alertes';
+      document.getElementById('alertTable').innerHTML = list.length ? [...list].reverse().slice(0,100).map(a => `
+        <tr>
+          <td><strong>V-${a.vehicle?.id ?? '?'}</strong></td>
+          <td>${alertBadge(a.type)}</td>
+          <td style="font-family:'JetBrains Mono',monospace">${a.valeur?.toFixed(2) ?? '—'}</td>
+          <td style="color:var(--muted)">${fmtDate(a.timestamp)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteAlert(${a.id})">🗑️</button></td>
+        </tr>`).join('') : '<tr><td colspan="5" class="empty"><div class="empty-icon">✅</div>Aucune alerte</td></tr>';
+    } catch(e) { toast('Erreur alertes', 'error'); }
+  }
 
-async function deleteMaintenance(id) {
-  if (!confirm('Supprimer ?')) return;
-  try {
-    await api('/maintenances/' + id, 'DELETE');
-    loadMaintenance();
-    toast('Supprimé');
-  } catch(e) { toast('Erreur', 'error'); }
-}
+  async function deleteAlert(id) {
+    try {
+      await api('/alerts/' + id, 'DELETE');
+      loadAlerts();
+      toast('Alerte supprimée');
+    } catch(e) { toast('Erreur', 'error'); }
+  }
 
-// ── INIT ─────────────────────────────────────────
-loadDashboard();
+  // ── SCORES ───────────────────────────────────────
+  async function loadScores() {
+    try {
+      const vehicles = await api('/vehicles');
+      const scores = await Promise.all(vehicles.map(v => api('/scores/chauffeur/' + v.id)));
+      const sorted = scores.sort((a, b) => b.scoreGlobal - a.scoreGlobal);
+      const medals = ['🥇', '🥈', '🥉'];
+      document.getElementById('scoreTable').innerHTML = sorted.map((s, i) => `
+        <tr>
+          <td style="font-size:18px">${medals[i] ?? i+1}</td>
+          <td><strong>Vehicle #${s.vehicleId}</strong></td>
+          <td>${scoreBar(s.scoreGlobal)}</td>
+          <td>${scoreBar(s.securite)}</td>
+          <td>${scoreBar(s.freinage)}</td>
+          <td>${scoreBar(s.discipline)}</td>
+        </tr>`).join('');
+    } catch(e) { toast('Erreur scores', 'error'); }
+  }
+
+  // ── MAINTENANCE ──────────────────────────────────
+  async function loadMaintenance() {
+    try {
+      const list = await api('/maintenances');
+      document.getElementById('maintenanceTable').innerHTML = list.length ? list.map(m => `
+        <tr>
+          <td><strong>V-${m.vehicle?.id ?? '?'}</strong></td>
+          <td>${m.type ?? '—'}</td>
+          <td style="color:var(--muted)">${fmtDate(m.dateIntervention)}</td>
+          <td style="font-family:'JetBrains Mono',monospace">${m.kilometrage?.toLocaleString() ?? '—'} km</td>
+          <td style="font-family:'JetBrains Mono',monospace">${m.prochainKm?.toLocaleString() ?? '—'} km</td>
+          <td style="color:var(--muted)">${m.notes ?? '—'}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteMaintenance(${m.id})">🗑️</button></td>
+        </tr>`).join('') : '<tr><td colspan="7" class="empty"><div class="empty-icon">🔧</div>Aucune maintenance</td></tr>';
+    } catch(e) { toast('Erreur maintenance', 'error'); }
+  }
+
+  async function openMaintenanceModal() {
+    const vehicles = await api('/vehicles');
+    document.getElementById('mVehicle').innerHTML = vehicles.map(v =>
+      `<option value="${v.id}">${v.nom} (${v.matricule ?? '—'})</option>`).join('');
+    openModal('maintenanceModal');
+  }
+
+  async function saveMaintenance() {
+    const body = {
+      vehicle:          { id: parseInt(document.getElementById('mVehicle').value) },
+      type:             document.getElementById('mType').value,
+      dateIntervention: document.getElementById('mDate').value,
+      kilometrage:      parseFloat(document.getElementById('mKm').value),
+      prochainKm:       parseFloat(document.getElementById('mNextKm').value),
+      notes:            document.getElementById('mNotes').value
+    };
+    try {
+      await api('/maintenances', 'POST', body);
+      closeModal('maintenanceModal');
+      loadMaintenance();
+      toast('Maintenance ajoutée ✓');
+    } catch(e) { toast('Erreur: ' + e.message, 'error'); }
+  }
+
+  async function deleteMaintenance(id) {
+    if (!confirm('Supprimer ?')) return;
+    try {
+      await api('/maintenances/' + id, 'DELETE');
+      loadMaintenance();
+      toast('Supprimé');
+    } catch(e) { toast('Erreur', 'error'); }
+  }
+
+  // ── INIT ─────────────────────────────────────────
+  loadDashboard();
 </script>
 </body>
 </html>
