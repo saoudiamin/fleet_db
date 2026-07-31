@@ -33,7 +33,9 @@ public class ScoreService {
         long speedAlerts    = alertRepository.countByVehicleId(vehicleId);
         long freinages      = eventRepository.countByVehicleIdAndType(vehicleId, "FREINAGE");
         long geofenceAlerts = alertRepository.findByType("GEOFENCE")
-                .stream().filter(a -> a.getVehicle().getId().equals(vehicleId)).count();
+                .stream()
+                .filter(a -> a.getVehicle() != null && vehicleId.equals(a.getVehicle().getId()))
+                .count();
 
         // Distance totale
         Double totalDistance = trajetRepository.sumDistanceByVehicleId(vehicleId);
