@@ -151,10 +151,14 @@ public class PositionService {
     public Map<String, String> getAllLivePositions() {
         Map<String, String> positions = new HashMap<>();
         try {
-            var keys = redisTemplate.keys("vehicle:live:*");
-            if (keys != null) {
-                for (String key : keys) {
-                    positions.put(key, redisTemplate.opsForValue().get(key));
+            List<Vehicle> activeVehicles = vehicleRepository.findByStatut("ACTIF");
+            for (Vehicle vehicle : activeVehicles) {
+                if (vehicle.getId() != null) {
+                    String key = livePositionKey(vehicle.getId());
+                    String position = redisTemplate.opsForValue().get(key);
+                    if (position != null) {
+                        positions.put(key, position);
+                    }
                 }
             }
         } catch (Exception e) {

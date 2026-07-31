@@ -879,12 +879,9 @@ input:focus, select:focus {
       <div class="kpi-grid" id="kpiGrid">
         <div class="kpi-card accent"><div class="kpi-label">Véhicules</div><div class="kpi-value" id="kpi-total">—</div></div>
         <div class="kpi-card success"><div class="kpi-label">Actifs</div><div class="kpi-value" id="kpi-actif">—</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">En live</div><div class="kpi-value" id="kpi-live">—</div></div>
+        <div class="kpi-card danger"><div class="kpi-label">Arrêtés</div><div class="kpi-value" id="kpi-arrete">—</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Maintenance</div><div class="kpi-value" id="kpi-maint">—</div></div>
         <div class="kpi-card danger"><div class="kpi-label">Alertes totales</div><div class="kpi-value" id="kpi-alerts">—</div></div>
-        <div class="kpi-card danger"><div class="kpi-label">Vitesse</div><div class="kpi-value" id="kpi-speed">—</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Température</div><div class="kpi-value" id="kpi-temp">—</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">Trajets</div><div class="kpi-value" id="kpi-trajets">—</div></div>
       </div>
 
       <div class="card">
@@ -1195,14 +1192,12 @@ input:focus, select:focus {
         api('/dashboard/kpis'),
         api('/alerts')
       ]);
+      const liveCount = kpis.enMouvement ?? kpis.liveVehicles ?? kpis.enLive ?? kpis.actifs ?? '—';
       document.getElementById('kpi-total').textContent  = kpis.totalVehicles  ?? '—';
-      document.getElementById('kpi-actif').textContent  = kpis.actifs         ?? '—';
-      document.getElementById('kpi-live').textContent   = kpis.enMouvement    ?? '—';
+      document.getElementById('kpi-actif').textContent  = liveCount;
+      document.getElementById('kpi-arrete').textContent = kpis.arretes       ?? '—';
       document.getElementById('kpi-maint').textContent  = kpis.maintenance    ?? '—';
       document.getElementById('kpi-alerts').textContent = kpis.totalAlerts    ?? '—';
-      document.getElementById('kpi-speed').textContent  = kpis.speedAlerts    ?? '—';
-      document.getElementById('kpi-temp').textContent   = kpis.tempAlerts     ?? '—';
-      document.getElementById('kpi-trajets').textContent= kpis.totalTrajets   ?? '—';
 
       const recent = alerts.slice(-10).reverse();
       document.getElementById('dashAlerts').innerHTML = recent.length ? recent.map(a => `
@@ -1233,9 +1228,11 @@ input:focus, select:focus {
   async function updateMapPositions() {
     try {
       const data = await api('/positions/live');
+      const liveIds = new Set();
       Object.entries(data).forEach(([key, raw]) => {
         const pos = JSON.parse(raw);
         const id  = key.replace('vehicle:live:', '');
+        liveIds.add(id);
         const lat = parseFloat(pos.lat), lng = parseFloat(pos.lng);
         const spd = parseFloat(pos.speed);
         const color = spd > 120 ? '#DC2626' : spd > 80 ? '#D97706' : '#16A34A';
@@ -1249,6 +1246,12 @@ input:focus, select:focus {
           markers[id].setLatLng([lat, lng]).setIcon(icon).setPopupContent(popup);
         } else {
           markers[id] = L.marker([lat, lng], { icon }).addTo(map).bindPopup(popup);
+        }
+      });
+      Object.keys(markers).forEach(id => {
+        if (!liveIds.has(id)) {
+          map.removeLayer(markers[id]);
+          delete markers[id];
         }
       });
     } catch(e) { console.error(e); }
